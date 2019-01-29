@@ -2,7 +2,7 @@ GCC		= g++
 MAKE		= make
 OPTIMIZE	= -O2 -DSUPPORT_LH7 -DMKSTEMP
 CFLAGS		= -std=c++11 -Winline -pipe -g
-LDLIBS		= -lpthread
+LDLIBS		= -lpthread -lUseful
 
 Socket.so : socket.o crc.o
 	#$(GCC) $(CFLAGS) -fPIC -shared Socket.cpp crc.o -o libSocket.so.1 $(LDLIBS)

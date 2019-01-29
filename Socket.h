@@ -29,7 +29,6 @@
 #include <sys/types.h>
 #include <thread>
 #include <mutex>
-#include <useful.h>
 #include <deque>
 #include <queue>
 
@@ -78,9 +77,10 @@ enum LagMessageTypes : uint8_t{
 };
 
 struct Message{
-	MessageType type;
+	uint8_t type;
 	uint16_t length;
-	uint8_t data[MAX_SIZE];
+	//uint8_t data[MAX_SIZE];
+	uint8_t *data;
 	uint32_t crc;
 };
 

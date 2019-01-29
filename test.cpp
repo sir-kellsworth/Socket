@@ -22,11 +22,12 @@ int main(int argc,char *argv[]){
 	Socket s2(5556);
 	std::cout << "made sockets" << std::endl;
 
-	std::string data = "big bad voodoo daddy";
+	std::string data = "big bad voodoo daddy, super duper";
 
 	Message message;
 	message.type = ACK;
-	message.length = data.length();
+	message.length = (unsigned)data.length();
+	message.data = (uint8_t *)malloc(message.length);
 	memcpy(message.data, data.c_str(), data.length());
 	s1.write(&message,"127.0.0.1",5556);
 
@@ -61,7 +62,7 @@ int main(int argc,char *argv[]){
 	d = std::string((char *)received.data,received.length);
 	std::cout << "got message " << d << std::endl;
 
-	double lag = s1.checkLag(10,"192.168.2.5",5556,5555);
+	double lag = s1.checkLag(10,"127.0.0.1",5556,5555);
 	std::cout << "lag time: " << lag << std::endl;
 
 	return 0;

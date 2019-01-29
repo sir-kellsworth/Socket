@@ -64,27 +64,42 @@ bool Socket::getMessage(Message *message,std::string &sender,int &port){
 void Socket::checkForMessage(){
 	struct sockaddr_in client;
 	int length = sizeof(client);
-	uint8_t *buffer = new uint8_t[sizeof(Message)];
+	uint8_t *buffer = new uint8_t[MAX_SIZE];
+
 	//this method is blocking
-	int bytes_read = recvfrom(sock,buffer,sizeof(Message),0,(struct sockaddr *)&client, (socklen_t *)&length);
+	int bytes_read = recvfrom(sock,buffer,MAX_SIZE,0,(struct sockaddr *)&client, (socklen_t *)&length);
 	if(bytes_read > 0){
-		Message message;
+		Message *message = new Message;
 		std::string sender;
 		int port;
 
-		//memcpy(&message,buffer,bytes_read);
 		sender = inet_ntoa(client.sin_addr);
 		port = ntohs(client.sin_port);
 		StoredPacket packet;
-		memcpy(&packet.message,buffer,bytes_read);
+		message->type = buffer[0];
+		message->length = (buffer[1] << 8) + buffer[2];
+		/*std::cout << "got message: ";
+		for(int i = 0; i < bytes_read; i++){
+			std::cout << (int)buffer[i] << " ";
+		}
+		std::cout << std::endl;
+		std::cout << (int)buffer[0] << " " << (int)buffer[1] << " " << (int)buffer[2] << std::endl;
+		std::cout << "got length: " << message->length << std::endl;
+		std::cout << "read num Bytes: " << bytes_read << std::endl;*/
+		buffer += 3;
+		message->data = (uint8_t *)malloc(message->length);
+		memcpy(message->data,buffer,message->length);
+		buffer += message->length;
+		message->crc = (buffer[0] << 24) + (buffer[1] << 16) + (buffer[2] << 8) + buffer[3];
 		packet.sender = sender;
 		packet.port = port;
+		packet.message = *message;
 		packet.timestamp = std::chrono::high_resolution_clock::now();
-		if(packet.message.type == LAG){
-			if(packet.message.data[0] == PING){
-				int lagPort = (packet.message.data[1] << 8) + packet.message.data[2];
-				packet.message.data[0] = PONG;
-				write(&packet.message,packet.sender,lagPort);
+		if(message->type == LAG){
+			if(message->data[0] == PING){
+				int lagPort = (message->data[1] << 8) + message->data[2];
+				message->data[0] = PONG;
+				write(message,sender,lagPort);
 			}else{
 				lagTestingMessages.push(packet);
 			}
@@ -111,48 +126,89 @@ void Socket::write(Message *message,std::string address,int port){
 	generateCRC(message);
 
 	int total = 0;
-	int bytesLeft = sizeof(Message);//sizeof(message);
+	int bytesLeft = message->length+7;//sizeof(message);
 	int n;
+	uint8_t *buffer = (uint8_t *)malloc(message->length+7);
+	buffer[0] = message->type;
+	buffer[1] = message->length >> 8;
+	buffer[2] = message->length;
+	buffer += 3;
+	memcpy(buffer,message->data,message->length);
+	buffer -= 3;
+	buffer[message->length+3] = message->crc >> 24;
+	buffer[message->length+4] = message->crc >> 16;
+	buffer[message->length+5] = message->crc >> 8;
+	buffer[message->length+6] = message->crc;
+	/*std::cout << "sending message: ";
+	for(int i = 0; i < sizeof(buffer); i++){
+		std::cout << (int)buffer[i] << " ";
+	}
+	std::cout << std::endl;*/
 
 	while(total < bytesLeft){
-		n = sendto(sock,message,sizeof(Message),0,(struct sockaddr *)&dest,sizeof(dest));
+		n = sendto(sock,buffer,message->length+7,0,(struct sockaddr *)&dest,sizeof(dest));
 		if(n == -1){break;}
 		total += n;
 		bytesLeft -= n;
 	}
+	//std::cout << "sent: " << total << " bytes out of " << message->length+7 << " total" << std::endl;
 
 	writingMutex.unlock();
+	buffer = NULL;
 }
 
 bool Socket::checkCRC(Message *message){
-	int size = sizeof(Message) - sizeof(uint32_t);
-	uint32_t crc = crcFast(reinterpret_cast<const unsigned char*>(message), size);
+	int size = message->length+3;//sizeof(Message) - sizeof(uint32_t);
+	unsigned char *buffer = (unsigned char*)malloc(size);
+	buffer[0] = message->type;
+	buffer[1] = message->length >> 8;
+	buffer[2] = message->length;
+	for(int i = 0; i < message->length; i++){
+		buffer[3+i] = message->data[i];
+	}
+	std::cout << std::endl;
+	uint32_t crc = crcFast(buffer,size);//crcFast(reinterpret_cast<const unsigned char*>(message), size);
 	if(crc == message->crc){
 		return true;
 	}else{
 		return false;
 	}
+
+	buffer = NULL;
 }
 
 void Socket::generateCRC(Message *message){
-	int size = sizeof(Message) - sizeof(uint32_t);
-	uint32_t crc = crcFast(reinterpret_cast<const unsigned char*>(message), size);
+	int size = message->length+3;//sizeof(Message) - sizeof(uint32_t);
+	unsigned char *buffer = (unsigned char*)malloc(size);
+	buffer[0] = message->type;
+	buffer[1] = message->length >> 8;
+	buffer[2] = message->length;
+	for(int i = 0; i < message->length; i++){
+		buffer[3+i] = message->data[i];
+	}
+	uint32_t crc = crcFast(buffer,size);//crcFast(reinterpret_cast<const unsigned char*>(message), size);
 	message->crc = crc;
+
+	buffer = NULL;
 }
 
 double Socket::checkLag(int sampleSize,std::string address,int port,uint16_t receivePort){
 	double sum = 0;
+	Message *test = new Message;
+	test->length = 0x03;
+	test->data = (uint8_t *)malloc(test->length);
+	test->type = LAG;
+	test->data[0] = PING;
+	test->data[1] = receivePort >> 8;
+	test->data[2] = receivePort;
 	for(int i = 0; i < sampleSize; i++){
-		Message test;
-		test.type = LAG;
-		test.length = 3;
-		test.data[0] = PING;
-		test.data[1] = receivePort >> 8;
-		test.data[2] = (uint8_t)receivePort;
+		/*std::cout << "sending data: " << (int)test->type << " " << (int)(test->length >> 8) << " " << (int)test->length << std::endl;
+		std::cout << "to " << address << " at port: " << port << std::endl;
+		std::cout << "data: " << (int)test->data[0] << " " << (int)test->data[1] << " " << (int)test->data[2] << std::endl;*/
 		std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
-		write(&test,address,port);
+		write(test,address,port);
 		while(lagTestingMessages.empty()){
-			std::this_thread::sleep_for(std::chrono::milliseconds(10));
+			std::this_thread::sleep_for(std::chrono::microseconds(1));
 		}
 		StoredPacket message = lagTestingMessages.front();
 		lagTestingMessages.pop();
@@ -162,6 +218,7 @@ double Socket::checkLag(int sampleSize,std::string address,int port,uint16_t rec
 		//about 1/2 the time...
 		sum += (span.count() / 2);
 	}
+	delete(test);
 
 	return sum / sampleSize;
 }

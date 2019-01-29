@@ -5,6 +5,7 @@
 int main(int argc,char *argv[]){
 	Socket socket(5555);
 
+	std::cout << "made socket. Waiting for connection" << std::endl;
 	while(!socket.available()){
 		std::this_thread::sleep_for(std::chrono::seconds(1));
 	}
@@ -27,7 +28,8 @@ int main(int argc,char *argv[]){
 	Message responce;
 	responce.type = DATA;
 	responce.length = data.length();
-	memcpy(&responce.data,data.c_str(),data.length());
+	responce.data = (uint8_t *)malloc(data.length());
+	memcpy(responce.data,data.c_str(),data.length());
 	socket.write(&responce,client,5556);
 
 	return 0;
